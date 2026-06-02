@@ -1,0 +1,6 @@
+{
+  "name": "Sosmed Plaza",
+  "description": "Platform monitoring tim sosial media, pelaporan harian, kenaikan pengikut akun, dan omset toko online retail.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
