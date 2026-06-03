@@ -444,6 +444,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [isDarkMode]);
 
+  // Keep currentUser in sync with allUsers changes to prevent stale states
+  useEffect(() => {
+    const fresh = allUsers.find(u => u.id === currentUser.id);
+    if (fresh) {
+      if (
+        fresh.name !== currentUser.name ||
+        fresh.username !== currentUser.username ||
+        fresh.email !== currentUser.email ||
+        fresh.role !== currentUser.role ||
+        fresh.avatar !== currentUser.avatar ||
+        fresh.phone !== currentUser.phone ||
+        fresh.targetFollowers !== currentUser.targetFollowers ||
+        fresh.pinCode !== currentUser.pinCode
+      ) {
+        setCurrentUser(fresh);
+      }
+    }
+  }, [allUsers, currentUser.id]);
+
   // LOG ACTIVITY HELPERS
   const logActivity = (
     action: string, 
@@ -570,7 +589,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (currentUser.id === userId) {
       setCurrentUser(prev => ({ ...prev, ...data }));
     }
-    logActivity('Update Profil', `Memperbarui profil anggota tim ID: ${userId}.`, 'logTeam');
+    
+    // Auto-propagate name change to related logs & lists
+    if (data.name) {
+      setTodos(prev => prev.map(todo => 
+        todo.assignedToId === userId 
+          ? { ...todo, assignedToName: data.name! } 
+          : todo
+      ));
+      setSosmedRecords(prev => prev.map(rec => 
+        rec.reportedById === userId 
+          ? { ...rec, reportedByName: data.name! } 
+          : rec
+      ));
+      setOmsetRecords(prev => prev.map(rec => 
+        rec.reportedById === userId 
+          ? { ...rec, reportedByName: data.name! } 
+          : rec
+      ));
+      setActivities(prev => prev.map(act => 
+        act.userId === userId 
+          ? { ...act, userName: data.name! } 
+          : act
+      ));
+    }
+
+    logActivity('Update Profil', `Memperbarui profil anggota tim ID: ${userId} (${data.name || ''}).`, 'logTeam');
   };
 
   // TODOS CRUD

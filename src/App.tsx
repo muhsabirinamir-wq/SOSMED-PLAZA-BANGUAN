@@ -125,6 +125,10 @@ function DashboardLayout() {
 }
 
 export default function App() {
+  React.useEffect(() => {
+    document.title = "SOSMED PLAZA BANGUNAN MAKASSAR";
+  }, []);
+
   return (
     <AppProvider>
       <DashboardLayout />

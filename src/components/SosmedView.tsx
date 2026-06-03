@@ -18,7 +18,9 @@ import {
   ArrowUpRight,
   TrendingDown,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Download,
+  FileSpreadsheet
 } from 'lucide-react';
 import { SosmedPlatform, SosmedRecord } from '../types';
 import { 
@@ -45,6 +47,8 @@ export const SosmedView: React.FC = () => {
   // Filter state
   const [filterPlatform, setFilterPlatform] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [filterStartDate, setFilterStartDate] = useState<string>('');
+  const [filterEndDate, setFilterEndDate] = useState<string>('');
 
   // Modals state
   const [isLogOpen, setIsLogOpen] = useState(false);
@@ -87,17 +91,45 @@ export const SosmedView: React.FC = () => {
     return highlights;
   }, [sosmedRecords]);
 
+  // Filter Table entries
+  const filteredRecords = useMemo(() => {
+    let result = [...sosmedRecords];
+
+    if (filterPlatform !== 'ALL') {
+      result = result.filter(r => r.platform === filterPlatform);
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(r => 
+        r.reportedByName.toLowerCase().includes(q) || 
+        (r.notes && r.notes.toLowerCase().includes(q))
+      );
+    }
+
+    if (filterStartDate) {
+      result = result.filter(r => r.date >= filterStartDate);
+    }
+
+    if (filterEndDate) {
+      result = result.filter(r => r.date <= filterEndDate);
+    }
+
+    // Sort descending by date
+    return result.sort((a, b) => b.date.localeCompare(a.date));
+  }, [sosmedRecords, filterPlatform, searchQuery, filterStartDate, filterEndDate]);
+
   // Area chart data mapping followers counts over date (pivoted by platform)
   const chartPivotData = useMemo(() => {
     // Collect all unique dates with explicit types to satisfy TS rules
-    const uniqueDates = (Array.from(new Set(sosmedRecords.map(r => r.date))) as string[]).sort((a, b) => a.localeCompare(b));
+    const uniqueDates = (Array.from(new Set(filteredRecords.map(r => r.date))) as string[]).sort((a, b) => a.localeCompare(b));
     
     return uniqueDates.map(d => {
       const row: any = { Tanggal: d.split('-').slice(1).join('/') }; // MM/DD
       
       const platforms: SosmedPlatform[] = ['TIKTOK', 'INSTAGRAM', 'FACEBOOK', 'WHATSAPP', 'MARKETPLACE'];
       platforms.forEach(plat => {
-        const match = sosmedRecords.find(r => r.date === d && r.platform === plat);
+        const match = filteredRecords.find(r => r.date === d && r.platform === plat);
         if (match) {
           row[plat] = match.followersCount;
         } else {
@@ -111,7 +143,7 @@ export const SosmedView: React.FC = () => {
 
       return row;
     });
-  }, [sosmedRecords]);
+  }, [filteredRecords, sosmedRecords]);
 
   // Open Log Modal
   const handleOpenLog = () => {
@@ -166,25 +198,44 @@ export const SosmedView: React.FC = () => {
     setSelectedRecord(null);
   };
 
-  // Filter Table entries
-  const filteredRecords = useMemo(() => {
-    let result = [...sosmedRecords];
-
-    if (filterPlatform !== 'ALL') {
-      result = result.filter(r => r.platform === filterPlatform);
-    }
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(r => 
-        r.reportedByName.toLowerCase().includes(q) || 
-        (r.notes && r.notes.toLowerCase().includes(q))
-      );
-    }
-
-    // Sort descending by date
-    return result.sort((a, b) => b.date.localeCompare(a.date));
-  }, [sosmedRecords, filterPlatform, searchQuery]);
+  // Export CSV Handler
+  const handleExportCSV = () => {
+    // Generate CSV headers
+    const headers = ['Tanggal', 'Platform', 'Jumlah Pengikut', 'Kenaikan Pengikut', 'Reporter', 'Catatan'];
+    
+    // Map records to rows
+    const rows = filteredRecords.map(rec => [
+      rec.date,
+      rec.platform,
+      rec.followersCount,
+      rec.growth,
+      rec.reportedByName,
+      rec.notes ? rec.notes.replace(/"/g, '""') : ''
+    ]);
+    
+    // Combine to CSV format
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(e => e.map(val => `"${val}"`).join(','))
+    ].join('\n');
+    
+    // Create Blob with UTF-8 BOM to display Indonesian characters properly in Excel
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    // Create download trigger programmatically
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    
+    const formattedDate = new Date().toISOString().split('T')[0];
+    const fileName = `laporan_pengikut_sosmed_makassar_${formattedDate}.csv`;
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50 dark:bg-slate-950 transition-colors">
@@ -241,6 +292,103 @@ export const SosmedView: React.FC = () => {
         })}
       </div>
 
+      {/* PUSAT PENGATURAN TANGGAL & TEMPAT DOWNLOAD FILE */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in" id="tanggal-download-hub">
+        
+        {/* Card 1: Filter Pengikut Berdasarkan Rentang Tanggal */}
+        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 shadow-sm rounded-xl p-5 lg:col-span-2 transition-colors flex flex-col justify-between">
+          <div>
+            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-red-600" />
+              <span>Saring Rentang Tanggal Pertumbuhan Pengikut</span>
+            </h4>
+            <p className="text-[11px] text-gray-400 mt-1">
+              Atur jangkauan pembukuan laporan pengikut untuk membatasi grafik dan log berkas secara real-time.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">
+                Tanggal Mulai (Dari):
+              </label>
+              <input
+                id="filter-sosmed-start-date"
+                type="date"
+                value={filterStartDate}
+                onChange={(e) => setFilterStartDate(e.target.value)}
+                className="w-full text-xs p-2.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-850 text-slate-800 dark:text-slate-100 font-medium focus:ring-1 focus:ring-red-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">
+                Tanggal Selesai (Sampai):
+              </label>
+              <input
+                id="filter-sosmed-end-date"
+                type="date"
+                value={filterEndDate}
+                onChange={(e) => setFilterEndDate(e.target.value)}
+                className="w-full text-xs p-2.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-850 text-slate-800 dark:text-slate-100 font-medium focus:ring-1 focus:ring-red-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-100 dark:border-slate-800/60">
+            <button
+              onClick={() => {
+                setFilterStartDate('');
+                setFilterEndDate('');
+              }}
+              className="px-3 py-1.5 bg-slate-105 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[11px] font-bold rounded-lg transition-colors border border-slate-150 dark:border-slate-705"
+            >
+              Reset Filter Tanggal
+            </button>
+          </div>
+        </div>
+
+        {/* Card 2: Tempat Download Berkas / File Laporan */}
+        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 shadow-sm rounded-xl p-5 hover:border-red-100 dark:hover:border-red-955 transition-colors flex flex-col justify-between">
+          <div>
+            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              <span>Tempat Download File Laporan</span>
+            </h4>
+            <p className="text-[11px] text-gray-400 mt-1">
+              Unduh rekaman pertumbuhan pengikut sesuai parameter filter aktif di samping.
+            </p>
+          </div>
+
+          <div className="my-4 p-3 bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800/60 rounded-lg space-y-1.5">
+            <div className="flex justify-between items-center text-[11px]">
+              <span className="text-gray-400 font-semibold">Tipe Berkas:</span>
+              <span className="font-bold text-slate-705 dark:text-slate-300">Spreadsheet (.CSV)</span>
+            </div>
+            <div className="flex justify-between items-center text-[11px]">
+              <span className="text-gray-400 font-semibold">Jumlah Baris:</span>
+              <span className="font-bold text-red-650 dark:text-red-400 bg-red-50 dark:bg-red-950/30 px-2 py-0.5 rounded">
+                {filteredRecords.length} Baris Data
+              </span>
+            </div>
+            <div className="flex justify-between items-center text-[11px]">
+              <span className="text-gray-400 font-semibold">Umpan Berkas:</span>
+              <span className="font-bold text-slate-705 dark:text-slate-300">Excel UTF-8 BOM</span>
+            </div>
+          </div>
+
+          <button
+            id="download-sosmed-file-btn"
+            onClick={handleExportCSV}
+            className="w-full py-2.5 bg-red-650 hover:bg-red-750 text-white text-[11px] font-extrabold rounded-lg flex items-center justify-center gap-2 shadow-sm hover:shadow hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={filteredRecords.length === 0}
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Download Berkas Laporan Pengikut</span>
+          </button>
+        </div>
+
+      </div>
+
       {/* Recharts Stacked Line tracking chart */}
       <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 shadow-sm rounded-xl p-5 transition-colors">
         <div className="flex justify-between items-center mb-4">
@@ -260,7 +408,7 @@ export const SosmedView: React.FC = () => {
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" className="dark:hidden" />
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" className="hidden dark:block" />
               <XAxis dataKey="Tanggal" tick={{ fontSize: 9, fill: '#94a3b8' }} stroke="#94a3b8" />
-              <YAxis tickFormater={(v: number) => v.toLocaleString('id-ID')} tick={{ fontSize: 9, fill: '#94a3b8' }} stroke="#94a3b8" />
+              <YAxis tickFormatter={(v: number) => v.toLocaleString('id-ID')} tick={{ fontSize: 9, fill: '#94a3b8' }} stroke="#94a3b8" />
               <RechartsTooltip contentStyle={{ fontSize: '11px', borderRadius: '8px' }} />
               <Legend wrapperStyle={{ fontSize: '10px', marginTop: '10px' }} />
               
