@@ -1,0 +1,126 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Profil anggota tim sosial media, manager, atau owner toko.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "username": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["OWNER", "MANAGER", "STAFF"] },
+        "avatar": { "type": "string" },
+        "phone": { "type": "string" },
+        "targetFollowers": { "type": "integer" },
+        "pinCode": { "type": "string" }
+      },
+      "required": ["id", "name", "username", "email", "role"]
+    },
+    "TodoItem": {
+      "title": "TodoItem",
+      "description": "Tugas harian tim sosmed.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "assignedToId": { "type": "string" },
+        "assignedToName": { "type": "string" },
+        "reporterId": { "type": "string" },
+        "priority": { "type": "string", "enum": ["TINGGI", "SEDANG", "RENDAH"] },
+        "status": { "type": "string", "enum": ["BELUM_MULAI", "SEDANG_DIKERJAKAN", "SELESAI"] },
+        "date": { "type": "string" },
+        "notesStaff": { "type": "string" },
+        "completedAt": { "type": "string" }
+      },
+      "required": ["id", "title", "assignedToId", "priority", "status", "date"]
+    },
+    "SosmedRecord": {
+      "title": "SosmedRecord",
+      "description": "Laporan pertumbuhan pengikut sosial media.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "platform": { "type": "string", "enum": ["INSTAGRAM", "TIKTOK", "FACEBOOK", "WHATSAPP", "MARKETPLACE"] },
+        "followersCount": { "type": "integer" },
+        "growth": { "type": "integer" },
+        "reportedById": { "type": "string" },
+        "reportedByName": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "date", "platform", "followersCount", "growth", "reportedById", "reportedByName"]
+    },
+    "OmsetRecord": {
+      "title": "OmsetRecord",
+      "description": "Laporan omset penjualan harian toko per saluran retail.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "nominal": { "type": "number" },
+        "channel": { "type": "string" },
+        "reportedById": { "type": "string" },
+        "reportedByName": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "date", "nominal", "channel", "reportedById", "reportedByName"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Log aktivitas audit keamanan dan operasional tim harian.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "userId", "userName", "userRole", "action", "details"]
+    },
+    "LoggingSettings": {
+      "title": "LoggingSettings",
+      "description": "Konfigurasi logging sistem dan retensi.",
+      "type": "object",
+      "properties": {
+        "logLoginSwitch": { "type": "boolean" },
+        "logTodos": { "type": "boolean" },
+        "logOmset": { "type": "boolean" },
+        "logSosmed": { "type": "boolean" },
+        "logTeam": { "type": "boolean" },
+        "retentionLimit": { "type": "integer" }
+      },
+      "required": ["logLoginSwitch", "logTodos", "logOmset", "logSosmed", "logTeam", "retentionLimit"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Dokumen profil masing-masing pengguna."
+    },
+    "todos/{todoId}": {
+      "schema": "TodoItem",
+      "description": "Daftar todo penugasan kerja harian."
+    },
+    "sosmedRecords/{recordId}": {
+      "schema": "SosmedRecord",
+      "description": "Dokumen pertumbuhan pengikut akun sosmed."
+    },
+    "omsetRecords/{recordId}": {
+      "schema": "OmsetRecord",
+      "description": "Laporan nominal omset harian retail."
+    },
+    "activityLogs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Log audit perubahan data dan log masuk."
+    },
+    "settings/logging": {
+      "schema": "LoggingSettings",
+      "description": "Konfigurasi logging global sosmed plaza."
+    }
+  }
+}

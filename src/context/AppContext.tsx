@@ -18,6 +18,36 @@ import {
   LoggingSettings
 } from '../types';
 
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  getDocs, 
+  onSnapshot,
+  query,
+  orderBy,
+  getDocFromServer,
+  writeBatch
+} from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import { db, auth, handleFirestoreError, OperationType } from '../firebase';
+
+// CRITICAL CONSTRAINT: Test Firestore Connection on boot
+async function testConnection() {
+  try {
+    const testDoc = doc(db, 'test', 'connection');
+    await getDocFromServer(testDoc);
+    console.log("Firebase Connection Verified Successfully.");
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration. Client is offline.");
+    }
+  }
+}
+testConnection();
+
 interface AppContextType {
   currentUser: UserProfile;
   allUsers: UserProfile[];
@@ -220,18 +250,16 @@ const defaultTodos = (): TodoItem[] => [
   }
 ];
 
-// Generates continuous data for 6 days
 const defaultSosmedRecords = (): SosmedRecord[] => {
   const records: SosmedRecord[] = [];
   const platforms: SosmedPlatform[] = ['TIKTOK', 'INSTAGRAM', 'FACEBOOK', 'WHATSAPP', 'MARKETPLACE'];
   
-  // Seed numbers represent progressive growth of followers/leads
   const initialCounts: Record<SosmedPlatform, number> = {
     TIKTOK: 44250,
     INSTAGRAM: 12100,
     FACEBOOK: 8900,
-    WHATSAPP: 3820, // WA leads count
-    MARKETPLACE: 23410 // Store followers
+    WHATSAPP: 3820,
+    MARKETPLACE: 23410
   };
 
   const dailyGrowth: Record<SosmedPlatform, number[]> = {
@@ -242,11 +270,9 @@ const defaultSosmedRecords = (): SosmedRecord[] => {
     MARKETPLACE: [60, 75, 82, 90, 105, 120]
   };
 
-  // Create over past 6 days
   for (let day = 5; day >= 0; day--) {
     const curDate = getDateRelative(day);
     platforms.forEach(plat => {
-      // Accumulate growth up to that day
       let currentVal = initialCounts[plat];
       for (let i = 5; i > day; i--) {
         currentVal += dailyGrowth[plat][5 - i];
@@ -277,7 +303,6 @@ const defaultOmsetRecords = (): OmsetRecord[] => {
   const records: OmsetRecord[] = [];
   const channels: SalesChannel[] = ['SHOPEE', 'TOKOPEDIA', 'TIKTOK_SHOP', 'SHOPEE_LIVE', 'TIKTOK_LIVE', 'WHATSAPP', 'INSTAGRAM_DM'];
 
-  // Base daily nominals for channels
   const channelBase: Record<SalesChannel, number> = {
     SHOPEE: 2500000,
     TOKOPEDIA: 1800000,
@@ -288,18 +313,16 @@ const defaultOmsetRecords = (): OmsetRecord[] => {
     INSTAGRAM_DM: 400000
   };
 
-  // Generate for 6 days with some randomness
   for (let day = 5; day >= 0; day--) {
     const curDate = getDateRelative(day);
     channels.forEach((chan, idx) => {
-      // deterministic but dynamic random factor
       const seed = (day * 3 + idx * 7) % 5;
       const multipliers = [1.0, 1.15, 0.9, 1.3, 1.05];
       const actualNominal = Math.round(channelBase[chan] * multipliers[seed]);
 
       const reporter = (chan === 'SHOPEE' || chan === 'TOKOPEDIA') ? defaultUsers[4] : 
                        (chan === 'TIKTOK_SHOP' || chan === 'TIKTOK_LIVE') ? defaultUsers[2] : 
-                       defaultUsers[3]; // rest in instagram/wa
+                       defaultUsers[3];
 
       records.push({
         id: `oms-${chan}-${day}`,
@@ -316,7 +339,6 @@ const defaultOmsetRecords = (): OmsetRecord[] => {
   return records;
 };
 
-// Initial activities
 const defaultActivities = (): ActivityLog[] => [
   {
     id: 'act-1',
@@ -348,95 +370,186 @@ const defaultActivities = (): ActivityLog[] => [
 ];
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Load data from LocalStorage or Fallback
   const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
     const stored = localStorage.getItem('sp_current_user');
-    return stored ? JSON.parse(stored) : defaultUsers[0]; // Budi Owner is default login
+    return stored ? JSON.parse(stored) : defaultUsers[0];
   });
 
-  const [allUsers, setAllUsers] = useState<UserProfile[]>(() => {
-    const stored = localStorage.getItem('sp_all_users');
-    return stored ? JSON.parse(stored) : defaultUsers;
-  });
-
-  const [todos, setTodos] = useState<TodoItem[]>(() => {
-    const stored = localStorage.getItem('sp_todos');
-    return stored ? JSON.parse(stored) : defaultTodos();
-  });
-
-  const [sosmedRecords, setSosmedRecords] = useState<SosmedRecord[]>(() => {
-    const stored = localStorage.getItem('sp_sosmed');
-    return stored ? JSON.parse(stored) : defaultSosmedRecords();
-  });
-
-  const [omsetRecords, setOmsetRecords] = useState<OmsetRecord[]>(() => {
-    const stored = localStorage.getItem('sp_omset');
-    return stored ? JSON.parse(stored) : defaultOmsetRecords();
-  });
-
-  const [activities, setActivities] = useState<ActivityLog[]>(() => {
-    const stored = localStorage.getItem('sp_activities');
-    return stored ? JSON.parse(stored) : defaultActivities();
-  });
-
+  const [allUsers, setAllUsers] = useState<UserProfile[]>(defaultUsers);
+  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [sosmedRecords, setSosmedRecords] = useState<SosmedRecord[]>([]);
+  const [omsetRecords, setOmsetRecords] = useState<OmsetRecord[]>([]);
+  const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     const stored = localStorage.getItem('sp_dark_mode');
     return stored ? JSON.parse(stored) === 'true' : false;
   });
 
-  const [loggingSettings, setLoggingSettings] = useState<LoggingSettings>(() => {
-    const stored = localStorage.getItem('sp_logging_settings');
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch (e) {
-        // use default
-      }
-    }
-    return {
-      logLoginSwitch: true,
-      logTodos: true,
-      logOmset: true,
-      logSosmed: true,
-      logTeam: true,
-      retentionLimit: 100
-    };
+  const [loggingSettings, setLoggingSettings] = useState<LoggingSettings>({
+    logLoginSwitch: true,
+    logTodos: true,
+    logOmset: true,
+    logSosmed: true,
+    logTeam: true,
+    retentionLimit: 100
   });
 
   const [pendingUserForLogin, setPendingUserForLogin] = useState<UserProfile | null>(null);
+  const [isFirebaseReady, setIsFirebaseReady] = useState<boolean>(false);
 
-  // Track data persistence to localStorage
+  // Sign-in Anonymous State verification
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      if (u) {
+        setIsFirebaseReady(true);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Firebase Firestore Database Synchronization
+  useEffect(() => {
+    if (!isFirebaseReady) return;
+
+    let active = true;
+    let unsubUsers = () => {};
+    let unsubTodos = () => {};
+    let unsubSosmed = () => {};
+    let unsubOmset = () => {};
+    let unsubActivities = () => {};
+    let unsubSettings = () => {};
+
+    const syncFirestore = async () => {
+      try {
+        const usersSnap = await getDocs(collection(db, 'users')).catch(err => {
+          handleFirestoreError(err, OperationType.LIST, 'users');
+          throw err;
+        });
+
+        if (usersSnap.empty && active) {
+          console.log("Database Firestore kosong, melakukan seed data awal...");
+          const batch = writeBatch(db);
+
+          defaultUsers.forEach(u => {
+            batch.set(doc(db, 'users', u.id), u);
+          });
+          defaultTodos().forEach(t => {
+            batch.set(doc(db, 'todos', t.id), t);
+          });
+          defaultSosmedRecords().forEach(s => {
+            batch.set(doc(db, 'sosmedRecords', s.id), s);
+          });
+          defaultOmsetRecords().forEach(o => {
+            batch.set(doc(db, 'omsetRecords', o.id), o);
+          });
+          defaultActivities().forEach(a => {
+            batch.set(doc(db, 'activityLogs', a.id), a);
+          });
+          batch.set(doc(db, 'settings', 'logging'), {
+            logLoginSwitch: true,
+            logTodos: true,
+            logOmset: true,
+            logSosmed: true,
+            logTeam: true,
+            retentionLimit: 100
+          });
+
+          await batch.commit().catch(err => {
+            handleFirestoreError(err, OperationType.WRITE, 'seed-data-batch');
+          });
+        }
+
+        if (!active) return;
+
+        // Subscriptions
+        unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+          const list: UserProfile[] = [];
+          snapshot.forEach(dSnapshot => {
+            list.push(dSnapshot.data() as UserProfile);
+          });
+          list.sort((a,b) => a.id.localeCompare(b.id));
+          setAllUsers(list);
+        }, (err) => {
+          handleFirestoreError(err, OperationType.GET, 'users');
+        });
+
+        unsubTodos = onSnapshot(collection(db, 'todos'), (snapshot) => {
+          const list: TodoItem[] = [];
+          snapshot.forEach(dSnapshot => {
+            list.push(dSnapshot.data() as TodoItem);
+          });
+          list.sort((a, b) => b.date.localeCompare(a.date));
+          setTodos(list);
+        }, (err) => {
+          handleFirestoreError(err, OperationType.GET, 'todos');
+        });
+
+        unsubSosmed = onSnapshot(collection(db, 'sosmedRecords'), (snapshot) => {
+          const list: SosmedRecord[] = [];
+          snapshot.forEach(dSnapshot => {
+            list.push(dSnapshot.data() as SosmedRecord);
+          });
+          list.sort((a, b) => b.date.localeCompare(a.date));
+          setSosmedRecords(list);
+        }, (err) => {
+          handleFirestoreError(err, OperationType.GET, 'sosmedRecords');
+        });
+
+        unsubOmset = onSnapshot(collection(db, 'omsetRecords'), (snapshot) => {
+          const list: OmsetRecord[] = [];
+          snapshot.forEach(dSnapshot => {
+            list.push(dSnapshot.data() as OmsetRecord);
+          });
+          list.sort((a, b) => b.date.localeCompare(a.date));
+          setOmsetRecords(list);
+        }, (err) => {
+          handleFirestoreError(err, OperationType.GET, 'omsetRecords');
+        });
+
+        unsubActivities = onSnapshot(collection(db, 'activityLogs'), (snapshot) => {
+          const list: ActivityLog[] = [];
+          snapshot.forEach(dSnapshot => {
+            list.push(dSnapshot.data() as ActivityLog);
+          });
+          list.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+          setActivities(list);
+        }, (err) => {
+          handleFirestoreError(err, OperationType.GET, 'activityLogs');
+        });
+
+        unsubSettings = onSnapshot(doc(db, 'settings', 'logging'), (dSnapshot) => {
+          if (dSnapshot.exists()) {
+            setLoggingSettings(dSnapshot.data() as LoggingSettings);
+          }
+        }, (err) => {
+          handleFirestoreError(err, OperationType.GET, 'settings/logging');
+        });
+
+      } catch (err) {
+        console.error("Gagal sinkronisasi data dengan Firebase.", err);
+      }
+    };
+
+    syncFirestore();
+
+    return () => {
+      active = false;
+      unsubUsers();
+      unsubTodos();
+      unsubSosmed();
+      unsubOmset();
+      unsubActivities();
+      unsubSettings();
+    };
+  }, [isFirebaseReady]);
+
+  // Handle active client side device settings persistence
   useEffect(() => {
     localStorage.setItem('sp_current_user', JSON.stringify(currentUser));
   }, [currentUser]);
 
   useEffect(() => {
-    localStorage.setItem('sp_all_users', JSON.stringify(allUsers));
-  }, [allUsers]);
-
-  useEffect(() => {
-    localStorage.setItem('sp_todos', JSON.stringify(todos));
-  }, [todos]);
-
-  useEffect(() => {
-    localStorage.setItem('sp_sosmed', JSON.stringify(sosmedRecords));
-  }, [sosmedRecords]);
-
-  useEffect(() => {
-    localStorage.setItem('sp_omset', JSON.stringify(omsetRecords));
-  }, [omsetRecords]);
-
-  useEffect(() => {
-    localStorage.setItem('sp_activities', JSON.stringify(activities));
-  }, [activities]);
-
-  useEffect(() => {
-    localStorage.setItem('sp_logging_settings', JSON.stringify(loggingSettings));
-  }, [loggingSettings]);
-
-  useEffect(() => {
     localStorage.setItem('sp_dark_mode', isDarkMode ? 'true' : 'false');
-    // Apply styling class
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
     } else {
@@ -444,7 +557,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [isDarkMode]);
 
-  // Keep currentUser in sync with allUsers changes to prevent stale states
+  // Keep active login in sync with allUsers to avoid stale state
   useEffect(() => {
     const fresh = allUsers.find(u => u.id === currentUser.id);
     if (fresh) {
@@ -463,8 +576,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [allUsers, currentUser.id]);
 
-  // LOG ACTIVITY HELPERS
-  const logActivity = (
+  // LOG ACTIVITY HELPER
+  const logActivity = async (
     action: string, 
     details: string, 
     category?: 'logLoginSwitch' | 'logTodos' | 'logOmset' | 'logSosmed' | 'logTeam'
@@ -473,8 +586,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
+    const logId = `act-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const newLog: ActivityLog = {
-      id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: logId,
       timestamp: new Date().toISOString(),
       userId: currentUser.id,
       userName: currentUser.name,
@@ -483,203 +597,206 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       details
     };
 
-    setActivities(prev => {
-      const updated = [newLog, ...prev];
-      const limit = loggingSettings.retentionLimit || 100;
-      if (updated.length > limit) {
-        return updated.slice(0, limit);
-      }
-      return updated;
-    });
+    try {
+      await setDoc(doc(db, 'activityLogs', logId), newLog);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `activityLogs/${logId}`);
+    }
   };
 
-  // AUTH & USERS
-  const switchUser = (userId: string) => {
+  // PROFILE / USER SWITCHING
+  const switchUser = async (userId: string) => {
     const found = allUsers.find(u => u.id === userId);
     if (found) {
       if (found.role === 'MANAGER' || found.role === 'OWNER') {
-        // Intercept and launch secure PIN login gate
         setPendingUserForLogin(found);
       } else {
-        // Staff switches instantly
         setCurrentUser(found);
         if (loggingSettings.logLoginSwitch) {
-          setActivities(prev => {
-            const newLog: ActivityLog = {
-              id: `act-${Date.now()}`,
-              timestamp: new Date().toISOString(),
-              userId: found.id,
-              userName: found.name,
-              userRole: found.role,
-              action: 'Login Staff (Instant)',
-              details: `Staff ${found.name} login sukses tanpa PIN keamanan.`
-            };
-            const updated = [newLog, ...prev];
-            const limit = loggingSettings.retentionLimit || 100;
-            if (updated.length > limit) {
-              return updated.slice(0, limit);
-            }
-            return updated;
+          const logId = `act-${Date.now()}`;
+          const newLog: ActivityLog = {
+            id: logId,
+            timestamp: new Date().toISOString(),
+            userId: found.id,
+            userName: found.name,
+            userRole: found.role,
+            action: 'Login Staff (Instant)',
+            details: `Staff ${found.name} login sukses tanpa PIN keamanan.`
+          };
+          await setDoc(doc(db, 'activityLogs', logId), newLog).catch(err => {
+            handleFirestoreError(err, OperationType.WRITE, `activityLogs/${logId}`);
           });
         }
       }
     }
   };
 
-  const confirmSwitchUser = (userId: string) => {
+  const confirmSwitchUser = async (userId: string) => {
     const found = allUsers.find(u => u.id === userId);
     if (found) {
       setCurrentUser(found);
       setPendingUserForLogin(null);
       if (loggingSettings.logLoginSwitch) {
-        setActivities(prev => {
-          const newLog: ActivityLog = {
-            id: `act-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            userId: found.id,
-            userName: found.name,
-            userRole: found.role,
-            action: 'Login Berhasil',
-            details: `Pengguna ${found.name} (${found.role}) meloloskan verifikasi PIN sesi.`
-          };
-          const updated = [newLog, ...prev];
-          const limit = loggingSettings.retentionLimit || 100;
-          if (updated.length > limit) {
-            return updated.slice(0, limit);
-          }
-          return updated;
+        const logId = `act-${Date.now()}`;
+        const newLog: ActivityLog = {
+          id: logId,
+          timestamp: new Date().toISOString(),
+          userId: found.id,
+          userName: found.name,
+          userRole: found.role,
+          action: 'Login Berhasil',
+          details: `Pengguna ${found.name} (${found.role}) meloloskan verifikasi PIN sesi.`
+        };
+        await setDoc(doc(db, 'activityLogs', logId), newLog).catch(err => {
+          handleFirestoreError(err, OperationType.WRITE, `activityLogs/${logId}`);
         });
       }
     }
   };
 
-  const logSecurityAlert = (targetUser: UserProfile, enteredPin: string) => {
+  const logSecurityAlert = async (targetUser: UserProfile, enteredPin: string) => {
     if (loggingSettings.logLoginSwitch) {
-      setActivities(prev => {
-        const newLog: ActivityLog = {
-          id: `act-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          userId: currentUser.id,
-          userName: currentUser.name,
-          userRole: currentUser.role,
-          action: 'PERCOBAAN LOGIN GAGAL',
-          details: `Peringatan Keamanan: Percobaan login sebagai ${targetUser.name} dengan PIN salah ("${enteredPin}").`
-        };
-        const updated = [newLog, ...prev];
-        const limit = loggingSettings.retentionLimit || 100;
-        if (updated.length > limit) {
-          return updated.slice(0, limit);
-        }
-        return updated;
+      const logId = `act-${Date.now()}`;
+      const newLog: ActivityLog = {
+        id: logId,
+        timestamp: new Date().toISOString(),
+        userId: currentUser.id,
+        userName: currentUser.name,
+        userRole: currentUser.role,
+        action: 'PERCOBAAN LOGIN GAGAL',
+        details: `Peringatan Keamanan: Percobaan login sebagai ${targetUser.name} dengan PIN salah ("${enteredPin}").`
+      };
+      await setDoc(doc(db, 'activityLogs', logId), newLog).catch(err => {
+        handleFirestoreError(err, OperationType.WRITE, `activityLogs/${logId}`);
       });
     }
   };
 
-  const addUser = (userData: Omit<UserProfile, 'id'>) => {
+  const addUser = async (userData: Omit<UserProfile, 'id'>) => {
+    const newId = `usr-${Date.now()}`;
     const newUser: UserProfile = {
       ...userData,
-      id: `usr-${Date.now()}`
+      id: newId
     };
-    setAllUsers(prev => [...prev, newUser]);
-    logActivity('Daftar Tim Baru', `Mendaftarkan posisi ${newUser.role} atas nama ${newUser.name}.`, 'logTeam');
+    try {
+      await setDoc(doc(db, 'users', newId), newUser);
+      await logActivity('Daftar Tim Baru', `Mendaftarkan posisi ${newUser.role} atas nama ${newUser.name}.`, 'logTeam');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `users/${newId}`);
+    }
   };
 
-  const updateUser = (userId: string, data: Partial<UserProfile>) => {
-    setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, ...data } : u));
-    if (currentUser.id === userId) {
-      setCurrentUser(prev => ({ ...prev, ...data }));
-    }
-    
-    // Auto-propagate name change to related logs & lists
-    if (data.name) {
-      setTodos(prev => prev.map(todo => 
-        todo.assignedToId === userId 
-          ? { ...todo, assignedToName: data.name! } 
-          : todo
-      ));
-      setSosmedRecords(prev => prev.map(rec => 
-        rec.reportedById === userId 
-          ? { ...rec, reportedByName: data.name! } 
-          : rec
-      ));
-      setOmsetRecords(prev => prev.map(rec => 
-        rec.reportedById === userId 
-          ? { ...rec, reportedByName: data.name! } 
-          : rec
-      ));
-      setActivities(prev => prev.map(act => 
-        act.userId === userId 
-          ? { ...act, userName: data.name! } 
-          : act
-      ));
-    }
+  const updateUser = async (userId: string, data: Partial<UserProfile>) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), data);
+      
+      // Auto-propagate name change to associated collections
+      if (data.name) {
+        todos.forEach(async (todo) => {
+          if (todo.assignedToId === userId) {
+            await updateDoc(doc(db, 'todos', todo.id), { assignedToName: data.name! })
+              .catch(err => handleFirestoreError(err, OperationType.UPDATE, `todos/${todo.id}`));
+          }
+        });
+        sosmedRecords.forEach(async (rec) => {
+          if (rec.reportedById === userId) {
+            await updateDoc(doc(db, 'sosmedRecords', rec.id), { reportedByName: data.name! })
+              .catch(err => handleFirestoreError(err, OperationType.UPDATE, `sosmedRecords/${rec.id}`));
+          }
+        });
+        omsetRecords.forEach(async (rec) => {
+          if (rec.reportedById === userId) {
+            await updateDoc(doc(db, 'omsetRecords', rec.id), { reportedByName: data.name! })
+              .catch(err => handleFirestoreError(err, OperationType.UPDATE, `omsetRecords/${rec.id}`));
+          }
+        });
+        activities.forEach(async (act) => {
+          if (act.userId === userId) {
+            await updateDoc(doc(db, 'activityLogs', act.id), { userName: data.name! })
+              .catch(err => handleFirestoreError(err, OperationType.UPDATE, `activityLogs/${act.id}`));
+          }
+        });
+      }
 
-    logActivity('Update Profil', `Memperbarui profil anggota tim ID: ${userId} (${data.name || ''}).`, 'logTeam');
+      await logActivity('Update Profil', `Memperbarui profil anggota tim ID: ${userId} (${data.name || ''}).`, 'logTeam');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${userId}`);
+    }
   };
 
   // TODOS CRUD
-  const addTodo = (todoData: Omit<TodoItem, 'id' | 'assignedToName'>) => {
+  const addTodo = async (todoData: Omit<TodoItem, 'id' | 'assignedToName'>) => {
     const assignedUser = allUsers.find(u => u.id === todoData.assignedToId);
     if (!assignedUser) return;
 
+    const newId = `todo-${Date.now()}`;
     const newTodo: TodoItem = {
       ...todoData,
-      id: `todo-${Date.now()}`,
+      id: newId,
       assignedToName: assignedUser.name,
     };
 
-    setTodos(prev => [newTodo, ...prev]);
-    logActivity('Tambah To-Do', `Membuat tugas baru "${newTodo.title}" untuk ditangani oleh ${newTodo.assignedToName}.`, 'logTodos');
-  };
-
-  const updateTodoStatus = (todoId: string, status: TodoStatus, notes?: string) => {
-    setTodos(prev => prev.map(todo => {
-      if (todo.id === todoId) {
-        const complTime = status === 'SELESAI' ? new Date().toISOString() : undefined;
-        return { 
-          ...todo, 
-          status, 
-          notesStaff: notes !== undefined ? notes : todo.notesStaff,
-          completedAt: complTime
-        };
-      }
-      return todo;
-    }));
-
-    const targetTodo = todos.find(t => t.id === todoId);
-    if (targetTodo) {
-      logActivity('Selesai/Progres To-Do', `Mengubah status tugas "${targetTodo.title}" menjadi ${status}.`, 'logTodos');
+    try {
+      await setDoc(doc(db, 'todos', newId), newTodo);
+      await logActivity('Tambah To-Do', `Membuat tugas baru "${newTodo.title}" untuk ditangani oleh ${newTodo.assignedToName}.`, 'logTodos');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `todos/${newId}`);
     }
   };
 
-  const editTodo = (todoId: string, updated: Partial<TodoItem>) => {
-    setTodos(prev => prev.map(todo => {
-      if (todo.id === todoId) {
-        let namePatch = {};
-        if (updated.assignedToId) {
-          const ass = allUsers.find(u => u.id === updated.assignedToId);
-          if (ass) namePatch = { assignedToName: ass.name };
-        }
-        return { ...todo, ...updated, ...namePatch };
+  const updateTodoStatus = async (todoId: string, status: TodoStatus, notes?: string) => {
+    const complTime = status === 'SELESAI' ? new Date().toISOString() : null;
+    const updatePayload: any = { status };
+    if (notes !== undefined) {
+      updatePayload.notesStaff = notes;
+    }
+    if (complTime) {
+      updatePayload.completedAt = complTime;
+    }
+
+    try {
+      await updateDoc(doc(db, 'todos', todoId), updatePayload);
+      const targetTodo = todos.find(t => t.id === todoId);
+      if (targetTodo) {
+        await logActivity('Selesai/Progres To-Do', `Mengubah status tugas "${targetTodo.title}" menjadi ${status}.`, 'logTodos');
       }
-      return todo;
-    }));
-    logActivity('Edit To-Do', `Mengedit detail To-Do ID: ${todoId}.`, 'logTodos');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `todos/${todoId}`);
+    }
   };
 
-  const deleteTodo = (todoId: string) => {
+  const editTodo = async (todoId: string, updated: Partial<TodoItem>) => {
+    let namePatch = {};
+    if (updated.assignedToId) {
+      const ass = allUsers.find(u => u.id === updated.assignedToId);
+      if (ass) namePatch = { assignedToName: ass.name };
+    }
+    const updatePayload = { ...updated, ...namePatch };
+
+    try {
+      await updateDoc(doc(db, 'todos', todoId), updatePayload);
+      await logActivity('Edit To-Do', `Mengedit detail To-Do ID: ${todoId}.`, 'logTodos');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `todos/${todoId}`);
+    }
+  };
+
+  const deleteTodo = async (todoId: string) => {
     const targetTodo = todos.find(t => t.id === todoId);
-    setTodos(prev => prev.filter(t => t.id !== todoId));
-    if (targetTodo) {
-      logActivity('Hapus To-Do', `Menghapus tugas harian "${targetTodo.title}".`, 'logTodos');
+    try {
+      await deleteDoc(doc(db, 'todos', todoId));
+      if (targetTodo) {
+        await logActivity('Hapus To-Do', `Menghapus tugas harian "${targetTodo.title}".`, 'logTodos');
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `todos/${todoId}`);
     }
   };
 
   // SOSMED CRUD
-  const addSosmedRecord = (rec: Omit<SosmedRecord, 'id' | 'reportedByName'>) => {
+  const addSosmedRecord = async (rec: Omit<SosmedRecord, 'id' | 'reportedByName'>) => {
     const reporter = allUsers.find(u => u.id === rec.reportedById) || currentUser;
     
-    // Check if progress already inputted today, to calculate correct growth
     const samePlatformYesterday = sosmedRecords
       .filter(s => s.platform === rec.platform)
       .sort((a, b) => b.date.localeCompare(a.date))[0];
@@ -689,48 +806,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       growthValue = Math.max(0, rec.followersCount - samePlatformYesterday.followersCount);
     }
 
+    const newId = `sos-${Date.now()}`;
     const newRecord: SosmedRecord = {
       ...rec,
-      id: `sos-${Date.now()}`,
+      id: newId,
       reportedByName: reporter.name,
       growth: growthValue
     };
 
-    setSosmedRecords(prev => [newRecord, ...prev]);
-    logActivity('Input Kenaikan Sosmed', `Mendata follower/leads baru di ${rec.platform}: +${growthValue} pengikut.`, 'logSosmed');
+    try {
+      await setDoc(doc(db, 'sosmedRecords', newId), newRecord);
+      await logActivity('Input Kenaikan Sosmed', `Mendata follower/leads baru di ${rec.platform}: +${growthValue} pengikut.`, 'logSosmed');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `sosmedRecords/${newId}`);
+    }
   };
 
-  const editSosmedRecord = (id: string, updated: Partial<SosmedRecord>) => {
-    setSosmedRecords(prev => prev.map(r => r.id === id ? { ...r, ...updated } : r));
-    logActivity('Edit Kenaikan Sosmed', `Memperbaiki log sosmed harian ID: ${id}.`, 'logSosmed');
+  const editSosmedRecord = async (id: string, updated: Partial<SosmedRecord>) => {
+    try {
+      await updateDoc(doc(db, 'sosmedRecords', id), updated);
+      await logActivity('Edit Kenaikan Sosmed', `Memperbaiki log sosmed harian ID: ${id}.`, 'logSosmed');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `sosmedRecords/${id}`);
+    }
   };
 
-  const deleteSosmedRecord = (id: string) => {
-    setSosmedRecords(prev => prev.filter(r => r.id !== id));
-    logActivity('Hapus Log Sosmed', `Menghapus entri laporan perkembangan sosmed.`, 'logSosmed');
+  const deleteSosmedRecord = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'sosmedRecords', id));
+      await logActivity('Hapus Log Sosmed', `Menghapus entri laporan perkembangan sosmed.`, 'logSosmed');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `sosmedRecords/${id}`);
+    }
   };
 
   // OMSET CRUD
-  const addOmsetRecord = (rec: Omit<OmsetRecord, 'id' | 'reportedByName'>) => {
+  const addOmsetRecord = async (rec: Omit<OmsetRecord, 'id' | 'reportedByName'>) => {
     const reporter = allUsers.find(u => u.id === rec.reportedById) || currentUser;
+    const newId = `oms-${Date.now()}`;
     const newRecord: OmsetRecord = {
       ...rec,
-      id: `oms-${Date.now()}`,
+      id: newId,
       reportedByName: reporter.name
     };
 
-    setOmsetRecords(prev => [newRecord, ...prev]);
-    logActivity('Input Omset Harian', `Melaporkan nominal omset Rp ${rec.nominal.toLocaleString('id-ID')} via ${rec.channel}.`, 'logOmset');
+    try {
+      await setDoc(doc(db, 'omsetRecords', newId), newRecord);
+      await logActivity('Input Omset Harian', `Melaporkan nominal omset Rp ${rec.nominal.toLocaleString('id-ID')} via ${rec.channel}.`, 'logOmset');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `omsetRecords/${newId}`);
+    }
   };
 
-  const editOmsetRecord = (id: string, updated: Partial<OmsetRecord>) => {
-    setOmsetRecords(prev => prev.map(r => r.id === id ? { ...r, ...updated } : r));
-    logActivity('Edit Catatan Omset', `Memperbaiki nominal omset ID: ${id}.`, 'logOmset');
+  const editOmsetRecord = async (id: string, updated: Partial<OmsetRecord>) => {
+    try {
+      await updateDoc(doc(db, 'omsetRecords', id), updated);
+      await logActivity('Edit Catatan Omset', `Memperbaiki nominal omset ID: ${id}.`, 'logOmset');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `omsetRecords/${id}`);
+    }
   };
 
-  const deleteOmsetRecord = (id: string) => {
-    setOmsetRecords(prev => prev.filter(r => r.id !== id));
-    logActivity('Hapus Catatan Omset', `Menghapus log omset nominal dari pembukuan.`, 'logOmset');
+  const deleteOmsetRecord = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'omsetRecords', id));
+      await logActivity('Hapus Catatan Omset', `Menghapus log omset nominal dari pembukuan.`, 'logOmset');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `omsetRecords/${id}`);
+    }
   };
 
   // UTILITIES
@@ -738,34 +881,86 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsDarkMode(!isDarkMode);
   };
 
-  const updateLoggingSettings = (newSettings: Partial<LoggingSettings>) => {
-    setLoggingSettings(prev => ({ ...prev, ...newSettings }));
-  };
-
-  const clearActivityLogs = () => {
-    setActivities([]);
-    if (loggingSettings.logTeam) {
-      const clearLog: ActivityLog = {
-        id: `act-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        userId: currentUser.id,
-        userName: currentUser.name,
-        userRole: currentUser.role,
-        action: 'Clear Audit Logs',
-        details: 'Seluruh riwayat audit log aktivitas telah dibersihkan oleh pengguna.'
-      };
-      setActivities([clearLog]);
+  const updateLoggingSettings = async (newSettings: Partial<LoggingSettings>) => {
+    try {
+      const merged = { ...loggingSettings, ...newSettings };
+      await setDoc(doc(db, 'settings', 'logging'), merged);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `settings/logging`);
     }
   };
 
-  const resetAllData = () => {
-    setCurrentUser(defaultUsers[0]);
-    setAllUsers(defaultUsers);
-    setTodos(defaultTodos());
-    setSosmedRecords(defaultSosmedRecords());
-    setOmsetRecords(defaultOmsetRecords());
-    setActivities(defaultActivities());
-    logActivity('Reset Database', 'Mengembalikan seluruh parameter ke data pabrikan awal.', 'logTeam');
+  const clearActivityLogs = async () => {
+    try {
+      const logsSnap = await getDocs(collection(db, 'activityLogs'));
+      const batch = writeBatch(db);
+      logsSnap.forEach(docSnap => {
+        batch.delete(docSnap.ref);
+      });
+      await batch.commit();
+
+      if (loggingSettings.logTeam) {
+        const clearLogId = `act-${Date.now()}`;
+        const clearLog: ActivityLog = {
+          id: clearLogId,
+          timestamp: new Date().toISOString(),
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userRole: currentUser.role,
+          action: 'Clear Audit Logs',
+          details: 'Seluruh riwayat audit log aktivitas telah dibersihkan oleh pengguna.'
+        };
+        await setDoc(doc(db, 'activityLogs', clearLogId), clearLog);
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `activityLogs`);
+    }
+  };
+
+  const resetAllData = async () => {
+    try {
+      const collectionsToClear = ['users', 'todos', 'sosmedRecords', 'omsetRecords', 'activityLogs'];
+      for (const col of collectionsToClear) {
+        const snap = await getDocs(collection(db, col));
+        const batch = writeBatch(db);
+        snap.forEach(docSnap => {
+          batch.delete(docSnap.ref);
+        });
+        await batch.commit();
+      }
+
+      const batchSeed = writeBatch(db);
+      defaultUsers.forEach(u => {
+        batchSeed.set(doc(db, 'users', u.id), u);
+      });
+      defaultTodos().forEach(t => {
+        batchSeed.set(doc(db, 'todos', t.id), t);
+      });
+      defaultSosmedRecords().forEach(s => {
+        batchSeed.set(doc(db, 'sosmedRecords', s.id), s);
+      });
+      defaultOmsetRecords().forEach(o => {
+        batchSeed.set(doc(db, 'omsetRecords', o.id), o);
+      });
+      defaultActivities().forEach(a => {
+        batchSeed.set(doc(db, 'activityLogs', a.id), a);
+      });
+      batchSeed.set(doc(db, 'settings', 'logging'), {
+        logLoginSwitch: true,
+        logTodos: true,
+        logOmset: true,
+        logSosmed: true,
+        logTeam: true,
+        retentionLimit: 100
+      });
+
+      await batchSeed.commit();
+
+      setCurrentUser(defaultUsers[0]);
+      await logActivity('Reset Database', 'Mengembalikan seluruh parameter ke data pabrikan awal.', 'logTeam');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `resetAllData`);
+    }
   };
 
   return (
