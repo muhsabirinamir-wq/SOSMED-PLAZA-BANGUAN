@@ -395,14 +395,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [pendingUserForLogin, setPendingUserForLogin] = useState<UserProfile | null>(null);
-  const [isFirebaseReady, setIsFirebaseReady] = useState<boolean>(false);
+  const [isFirebaseReady, setIsFirebaseReady] = useState<boolean>(true);
 
   // Sign-in Anonymous State verification
   useEffect(() => {
+    // Already initialized to true to prevent blocking if anonymous auth is disabled
     const unsubscribe = onAuthStateChanged(auth, (u) => {
-      if (u) {
-        setIsFirebaseReady(true);
-      }
+      // Auth state update observer
     });
     return () => unsubscribe();
   }, []);

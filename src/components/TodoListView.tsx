@@ -97,6 +97,12 @@ export const TodoListView: React.FC = () => {
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [notesStaff, setNotesStaff] = useState('');
 
+  // Quick Add Form States
+  const [quickTitle, setQuickTitle] = useState('');
+  const [quickAssignedToId, setQuickAssignedToId] = useState('');
+  const [quickPriority, setQuickPriority] = useState<TodoPriority>('SEDANG');
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
   // Computed data
   const staffMembers = useMemo(() => {
     return allUsers.filter(u => u.role === 'STAFF' || u.role === 'MANAGER');
@@ -128,6 +134,42 @@ export const TodoListView: React.FC = () => {
     });
 
     setIsCreateOpen(false);
+  };
+
+  // Set default quick PIC once staff list is loaded
+  React.useEffect(() => {
+    if (staffMembers.length > 0 && !quickAssignedToId) {
+      setQuickAssignedToId(staffMembers[0].id);
+    }
+  }, [staffMembers, quickAssignedToId]);
+
+  const handleQuickAddSubmit = (e?: React.FormEvent, customTitle?: string) => {
+    if (e) e.preventDefault();
+    const taskTitle = customTitle || quickTitle;
+    const picId = quickAssignedToId || staffMembers[0]?.id || currentUser.id;
+
+    if (!taskTitle.trim() || !picId) return;
+
+    addTodo({
+      title: taskTitle.trim(),
+      description: 'Ditambahkan secara instan via Panel Input Cepat.',
+      assignedToId: picId,
+      reporterId: currentUser.id,
+      priority: quickPriority,
+      status: 'BELUM_MULAI',
+      date: new Date().toISOString().split('T')[0] // Always today
+    });
+
+    if (!customTitle) {
+      setQuickTitle('');
+    }
+    
+    // Show instant feedback status badge / message
+    const staffName = staffMembers.find(s => s.id === picId)?.name || 'Tim';
+    setSuccessMessage(`Berhasil menambah tugas "${taskTitle.trim()}" untuk ${staffName}!`);
+    setTimeout(() => {
+      setSuccessMessage(null);
+    }, 4500);
   };
 
   // Open edit modal
@@ -288,6 +330,124 @@ export const TodoListView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* SECTION: PANEL QUICK-ADD & TEMPLATE OTOMATIS (OWNER/MANAGER ONLY) */}
+      {canModifyTasks && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-red-200 dark:border-red-950 shadow-md p-5 space-y-4 transition-colors relative overflow-hidden">
+          {/* Subtle background decoration */}
+          <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/5 rounded-full blur-xl pointer-events-none" />
+          
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="flex h-2.5 w-2.5 rounded-full bg-red-650 animate-pulse" />
+              <h4 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 uppercase tracking-wider flex items-center gap-1.5">
+                <span>⚡ Panel Tambah Tugas Instan</span>
+              </h4>
+            </div>
+            <span className="text-[10px] text-red-600 dark:text-red-400 font-bold bg-red-50 dark:bg-red-950/40 px-2 py-0.5 rounded-md">
+              Otomatis Sinkron
+            </span>
+          </div>
+
+          <p className="text-[11px] text-slate-400 font-medium -mt-1.5 leading-normal">
+            Isi judul atau klik salah satu rekomendasi kerja di bawah untuk langsung menambahkan tugas secara instan ke layar PIC tanpa membuka popup.
+          </p>
+
+          {successMessage && (
+            <div className="p-2 text-xs bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-400 rounded-lg flex items-center gap-2 animate-pulse font-semibold">
+              <span className="inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full shrink-0" />
+              {successMessage}
+            </div>
+          )}
+
+          <form onSubmit={(e) => handleQuickAddSubmit(e)} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+            {/* Task Title */}
+            <div className="md:col-span-5 space-y-1">
+              <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Judul Tugas Baru (Lalu Tekan Enter/Pencet Tambah)</label>
+              <input 
+                id="quick-add-title-input"
+                type="text" 
+                value={quickTitle}
+                onChange={(e) => setQuickTitle(e.target.value)}
+                placeholder="Ketik tugas (misal: Live TikTok Siang)..."
+                className="w-full text-xs p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-900/60 focus:outline-none focus:ring-1 focus:ring-red-500 text-slate-800 dark:text-slate-100 font-medium"
+              />
+            </div>
+
+            {/* Select PIC (Assigned Staff) */}
+            <div className="md:col-span-3 space-y-1">
+              <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Pilih Petugas (PIC)</label>
+              <select
+                id="quick-add-pic-select"
+                value={quickAssignedToId}
+                onChange={(e) => setQuickAssignedToId(e.target.value)}
+                className="w-full text-xs p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-900/60 focus:outline-none focus:ring-1 focus:ring-red-500 text-slate-800 dark:text-slate-100 font-medium"
+              >
+                {staffMembers.map(u => (
+                  <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Select Priority */}
+            <div className="md:col-span-2 space-y-1">
+              <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Prioritas</label>
+              <select
+                id="quick-add-priority-select"
+                value={quickPriority}
+                onChange={(e) => setQuickPriority(e.target.value as TodoPriority)}
+                className="w-full text-xs p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-900/60 focus:outline-none focus:ring-1 focus:ring-red-500 text-slate-800 dark:text-slate-100 font-semibold"
+              >
+                <option value="TINGGI">Tinggi</option>
+                <option value="SEDANG">Sedang</option>
+                <option value="RENDAH">Rendah</option>
+              </select>
+            </div>
+
+            {/* Submit Button */}
+            <div className="md:col-span-2">
+              <button
+                type="submit"
+                id="quick-add-submit-btn"
+                className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-900 dark:bg-red-600 hover:bg-slate-800 dark:hover:bg-red-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Tambah Instan</span>
+              </button>
+            </div>
+          </form>
+
+          {/* Quick recommendations / templates list */}
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800/60 space-y-2">
+            <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+              💡 Rekomendasi Kerja Instan (Sekali Klik Langsung Ditambahkan):
+            </span>
+            
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { label: "🎥 Live Shopee Siang", title: "Live Streaming Shopee Sesi Siang" },
+                { label: "🎥 Live Shopee Sore", title: "Live Streaming Shopee Sesi Sore" },
+                { label: "🎬 Upload Konten TikTok", title: "Upload Konten Video TikTok Tren Fashion" },
+                { label: "📸 Posting Instagram Reels", title: "Upload Video Reels Catalog Hijab Terbaru" },
+                { label: "💬 Balas WhatsApp & DM", title: "Balas Saku Sapaan DM & Chat Pelanggan" },
+                { label: "📊 Review Ads Meta", title: "Evaluasi ROAS & Budget Meta Ads Harian" },
+                { label: "📦 Persiap Handover Flash Sale", title: "Persiapan Promo Flash Sale di Marketplace" }
+              ].map((tmpl, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  id={`quick-tmpl-btn-${idx}`}
+                  onClick={() => handleQuickAddSubmit(undefined, tmpl.title)}
+                  className="px-2.5 py-1.5 bg-slate-50 hover:bg-red-50 dark:bg-slate-800/40 dark:hover:bg-red-950/30 border border-slate-200 dark:border-slate-800 text-[10px] sm:text-xs font-bold text-slate-700 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 hover:border-red-300 dark:hover:border-red-900/60 rounded-lg transition-all flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
+                >
+                  <Plus className="w-3 h-3 text-red-500 shrink-0" />
+                  <span>{tmpl.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SECTION: REKAPITULASI TO-DO LIST BERDASARKAN TANGGAL */}
       <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 transition-colors">

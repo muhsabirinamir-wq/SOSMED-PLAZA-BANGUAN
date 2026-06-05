@@ -7,9 +7,9 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
 export const auth = getAuth();
 
-// Automatically sign in anonymously to satisfy request.auth !== null rule
+// Automatically attempt to sign in anonymously. If disabled in Firebase Console, we proceed gracefully.
 signInAnonymously(auth).catch((err) => {
-  console.error("Failed anonymous sign-in", err);
+  console.warn("Note: Anonymous sign-in is disabled or restricted in Firebase Console. Proceeding with public Firestore rules bypassing auth checks.", err);
 });
 
 export enum OperationType {

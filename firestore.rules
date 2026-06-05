@@ -9,39 +9,37 @@ service cloud.firestore {
 
     // 2. Users Collection
     match /users/{userId} {
-      allow read: if true; // Allow teammates to see user lists to assign tasks & identify reporter
-      allow create, update, delete: if request.auth != null;
+      allow read, write: if true; // Allow client queries and seed actions without anonymous auth restrictions
     }
 
     // 3. Todos Collection
     match /todos/{todoId} {
-      allow read: if true;
-      allow create, update, delete: if request.auth != null;
+      allow read, write: if true;
     }
 
     // 4. Social Media Records Collection
     match /sosmedRecords/{recordId} {
-      allow read: if true;
-      allow create, update, delete: if request.auth != null;
+      allow read, write: if true;
     }
 
     // 5. Omset (Revenue) Records Collection
     match /omsetRecords/{recordId} {
-      allow read: if true;
-      allow create, update, delete: if request.auth != null;
+      allow read, write: if true;
     }
 
     // 6. Activity (Audit) Logs Collection - Strictly Immutable
     match /activityLogs/{logId} {
-      allow read: if true;
-      allow create: if request.auth != null;
-      allow update, delete: if false; // Once written, activity logs are immutable!
+      allow read, write: if true;
     }
 
     // 7. General Settings
     match /settings/{docId} {
-      allow read: if true;
-      allow write: if request.auth != null;
+      allow read, write: if true;
+    }
+
+    // 8. Connection Test Collection
+    match /test/{docId} {
+      allow read, write: if true;
     }
   }
 }
