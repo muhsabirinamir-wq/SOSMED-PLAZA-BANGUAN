@@ -421,47 +421,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const syncFirestore = async () => {
       try {
-        const usersSnap = await getDocs(collection(db, 'users')).catch(err => {
-          handleFirestoreError(err, OperationType.LIST, 'users');
-          throw err;
-        });
-
-        if (usersSnap.empty && active) {
-          console.log("Database Firestore kosong, melakukan seed data awal...");
-          const batch = writeBatch(db);
-
-          defaultUsers.forEach(u => {
-            batch.set(doc(db, 'users', u.id), u);
-          });
-          defaultTodos().forEach(t => {
-            batch.set(doc(db, 'todos', t.id), t);
-          });
-          defaultSosmedRecords().forEach(s => {
-            batch.set(doc(db, 'sosmedRecords', s.id), s);
-          });
-          defaultOmsetRecords().forEach(o => {
-            batch.set(doc(db, 'omsetRecords', o.id), o);
-          });
-          defaultActivities().forEach(a => {
-            batch.set(doc(db, 'activityLogs', a.id), a);
-          });
-          batch.set(doc(db, 'settings', 'logging'), {
-            logLoginSwitch: true,
-            logTodos: true,
-            logOmset: true,
-            logSosmed: true,
-            logTeam: true,
-            retentionLimit: 100
-          });
-
-          await batch.commit().catch(err => {
-            handleFirestoreError(err, OperationType.WRITE, 'seed-data-batch');
-          });
-        }
-
-        if (!active) return;
-
-        // Subscriptions
+        // Register ALL onSnapshot listeners immediately and in parallel.
+        // This guarantees that any changes made by Staff (or anyone) are instantly synced
+        // across screens of other logged-in users (like Managers) without waiting for network or check-locks.
         unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
           const list: UserProfile[] = [];
           snapshot.forEach(dSnapshot => {
@@ -469,6 +431,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
           list.sort((a,b) => a.id.localeCompare(b.id));
           setAllUsers(list);
+
+          // Seed if database is completely empty
+          if (active && snapshot.empty) {
+            console.log("Database Firestore kosong, melakukan seed data awal...");
+            const batch = writeBatch(db);
+
+            defaultUsers.forEach(u => {
+              batch.set(doc(db, 'users', u.id), u);
+            });
+            defaultTodos().forEach(t => {
+              batch.set(doc(db, 'todos', t.id), t);
+            });
+            defaultSosmedRecords().forEach(s => {
+              batch.set(doc(db, 'sosmedRecords', s.id), s);
+            });
+            defaultOmsetRecords().forEach(o => {
+              batch.set(doc(db, 'omsetRecords', o.id), o);
+            });
+            defaultActivities().forEach(a => {
+              batch.set(doc(db, 'activityLogs', a.id), a);
+            });
+            batch.set(doc(db, 'settings', 'logging'), {
+              logLoginSwitch: true,
+              logTodos: true,
+              logOmset: true,
+              logSosmed: true,
+              logTeam: true,
+              retentionLimit: 100
+            });
+
+            batch.commit().catch(err => {
+              handleFirestoreError(err, OperationType.WRITE, 'seed-data-batch');
+            });
+          }
         }, (err) => {
           handleFirestoreError(err, OperationType.GET, 'users');
         });
